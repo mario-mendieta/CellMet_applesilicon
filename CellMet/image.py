@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 
 from scipy import ndimage as ndi
-
+from scipy.spatial.transform import Rotation as R
 
 def get_label(image, label):
     """
@@ -74,10 +74,21 @@ def find_neighbours_cell_id(img_cell_dil, img_seg, background_value=0, by_plane=
         return id_unique, None
 
 
+def find_orientation(pts):
+    # Compute the covariance matrix
+    cov_matrix = np.cov(pts.T)
+
+    # Compute eigenvalues and eigenvectors
+    eigenvalues, eigenvectors = np.linalg.eig(cov_matrix)
+
+    # The eigenvector with the largest eigenvalue is the major axis
+    major_axis = eigenvectors[:, np.argmax(eigenvalues)]
+
+    return major_axis
+
 def find_cell_axis_center(img_cell, pixel_size, resize_image=True):
     """
-    Calculate distance map, and keep the maximum distance in each z plane in order to find the center of the cell.
-    Warning : result is slightly different from the measure made by ImageJ even if its is the same function that is used.
+    Find the middle of each plane to create the cell center axis.
 
     Parameters
     ----------
@@ -109,19 +120,49 @@ def find_cell_axis_center(img_cell, pixel_size, resize_image=True):
         sub_img_cell = img_cell
         xx_min, yy_min, zz_min = 0, 0, 0
 
-    edts = ndi.distance_transform_edt(sub_img_cell,
-                                      sampling=[pixel_size["z_size"],
-                                                pixel_size["y_size"],
-                                                pixel_size["x_size"]],
-                                      )
-    # Find center (=highest value) in each plane
-    x_c, y_c, z_c = [], [], []
-    for k in range(edts.shape[0]):
-        if edts[k].max() != 0:
-            y_, x_ = np.where(edts[k] == edts[k].max())
-            x_c.append(x_.mean() + xx_min)
-            y_c.append(y_.mean() + yy_min)
-            z_c.append(k + zz_min)
+    # Calculate orientation
+    pts = np.array(
+        np.array(np.where(sub_img_cell > 0)[::-1])).flatten().reshape(
+        len(np.where(sub_img_cell > 0)[0]), 3, order="F")
+    major_axis = find_orientation(pts)
+
+    # Mean center the data
+    center = np.mean(pts, axis=0)
+    points_centered = pts - center
+
+    # Calculate rotation matrix and apply it
+    # Target axis (Z-axis)
+    z_axis = np.array([0, 0, 1])
+
+    rotation_vector = np.cross(major_axis, z_axis)
+    rotation_angle = np.arccos(np.dot(major_axis, z_axis))
+    rotation = R.from_rotvec(
+        rotation_angle * rotation_vector / np.linalg.norm(rotation_vector))
+    rotation_matrix = rotation.as_matrix()
+
+    # Apply rotation to all points
+    rotated_points = (rotation_matrix @ points_centered.T).T + center
+    rotated_points = np.around(rotated_points, decimals=0)
+
+    # Find centerline
+    mean_rotated_pos = pd.DataFrame(rotated_points).groupby([2]).mean()
+    mean_rotated_pos[2] = mean_rotated_pos.index
+    mean_rotated_pos = np.array(mean_rotated_pos)
+
+    # Apply inverse rotation
+    inverse_rotation_matrix = rotation_matrix.T
+    mean_pos = (inverse_rotation_matrix @ (
+                mean_rotated_pos - center).T).T + center
+    mean_pos = np.around(mean_pos, decimals=0)
+
+    # Remove duplication in z-plane
+    mean_pos = pd.DataFrame(mean_pos).groupby([2]).mean()
+    mean_pos[2] = mean_pos.index
+    mean_pos = np.array(mean_pos)
+
+    x_c = mean_pos.flatten()[ ::3] + xx_min
+    y_c = mean_pos.flatten()[1::3] + yy_min
+    z_c = mean_pos.flatten()[2::3] + zz_min
 
     result = pd.DataFrame(data=[np.array(x_c),
                                 np.array(y_c),

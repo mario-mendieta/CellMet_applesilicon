@@ -6,7 +6,9 @@ import pandas as pd
 import numpy as np
 
 from scipy.spatial import ConvexHull
+from scipy.interpolate import splprep, splev
 from skimage.transform import resize
+
 from .segmentation import Segmentation
 from . import utils as csutils
 from . import image as csimage
@@ -200,7 +202,13 @@ def edge_analysis(seg: Segmentation):
         df_['z'] *= seg.pixel_size["z_size"]
         df_ = df_.groupby('z').mean()
         df_.reset_index(drop=False, inplace=True)
-        rd, sd, ci = calculate_lengths_curvature(df_, columns=list("xyz"))
+        # Smooth data ?
+        from scipy.interpolate import splprep, splev
+        tck, u = splprep(df_[list("xyz")].to_numpy().T, s=2)
+        u_fine = np.linspace(0, 1, len(df_))
+        smoothed_points = np.column_stack(splev(u_fine, tck))
+        sm_point_df = pd.DataFrame(smoothed_points3, columns=list("xyz"))
+        rd, sd, ci = calculate_lengths_curvature(sm_point_df, columns=list("xyz"))
         real_dist.append(rd)
         short_dist.append(sd)
         curv_ind.append(ci)
@@ -307,7 +315,7 @@ def face_analysis(seg: Segmentation):
 #                                       (cell_df["z_end"] - cell_df['z_start']).to_numpy()) * convert
 
 
-def calculate_lengths_curvature(data, columns):
+def calculate_lengths_curvature(data, columns, smooth = False):
     """
     Calculate length of the cell (real and shortest),  and curvature.
     Real distance is the distance between each pixel (we supposed to have one pixel per z plane).
@@ -326,8 +334,20 @@ def calculate_lengths_curvature(data, columns):
     curv_ind (float)
 
     """
-    real_dist = np.linalg.norm(data.diff()[columns].values, axis=1)[1:].sum()
-    short_dist = np.linalg.norm((data.iloc[-1] - data.iloc[0])[columns].values, )
+    if smooth:
+        # Fit a B-spline curve to the 3D points
+        tck, u = splprep(data[columns].to_numpy().T, s=4)
+
+        # Generate uniformly spaced smoothed points
+        u_fine = np.linspace(0, 1, 100)
+        smoothed_points = np.column_stack(splev(u_fine, tck))
+
+        real_dist = np.linalg.norm(np.diff(smoothed_points, axis=0), axis=1).sum()
+        short_dist = np.linalg.norm((smoothed_points[-1] - smoothed_points[0]))
+    else:
+        real_dist = np.linalg.norm(data.diff()[columns].values, axis=1)[1:].sum()
+        short_dist = np.linalg.norm((data.iloc[-1] - data.iloc[0])[columns].values, )
+
     if (real_dist == 0) or (short_dist == 0):
         curv_ind = np.nan
     else:
