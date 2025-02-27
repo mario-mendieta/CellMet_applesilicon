@@ -8,6 +8,7 @@ from tqdm.auto import tqdm
 
 import numpy as np
 import pandas as pd
+import networkx as nx
 
 import scipy.ndimage as ndi
 
@@ -39,7 +40,9 @@ def tqdm_joblib(*args, **kwargs):
 def generate_struct_dil(dim=3):
     struct_dil = ndi.generate_binary_structure(3, 2)
     struct_dil[0] = np.repeat(False, 9).reshape(3, 3)
+    struct_dil[0, 1, 1] = True
     struct_dil[2] = np.repeat(False, 9).reshape(3, 3)
+    struct_dil[2, 1, 1] = True
     if dim == 2:
         struct_dil = struct_dil[1]
 
@@ -143,3 +146,18 @@ def reduce_label_size(image):
         cpt += 1
 
     return image, bits_size
+
+def generate_connectivity_graph(cell_df, pos_column=["x_center", "y_center"]):
+    """
+    Create a connectivity graph
+    :param cell_df:
+    :type cell_df:
+    :return:
+    :rtype:
+    """
+    G = nx.Graph()
+    for c, row in cell_df.iterrows():
+        G.add_node(row["id_im"], pos=row[pos_column].to_numpy())
+    G.add_edges_from(face_df[["id_im_1", "id_im_2"]].to_numpy())
+
+    return G
