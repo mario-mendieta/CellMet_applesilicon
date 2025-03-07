@@ -161,3 +161,14 @@ def generate_connectivity_graph(cell_df, pos_column=["x_center", "y_center"]):
     G.add_edges_from(face_df[["id_im_1", "id_im_2"]].to_numpy())
 
     return G
+
+def remove_duplicate_arrays(array_list):
+    unique_arrays = []
+
+    for arr in array_list:
+        # Check if the array is not already in the unique_arrays list
+        if not any(np.array_equal(arr, unique_arr) for unique_arr in
+                   unique_arrays):
+            unique_arrays.append(arr)
+
+    return unique_arrays
