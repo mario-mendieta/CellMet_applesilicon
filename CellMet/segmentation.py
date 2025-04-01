@@ -167,10 +167,17 @@ class Segmentation:
             img_cell = csimage.get_label(img_cell_dil, 1).astype("uint8")
             img_cell_dil[img_cell_dil == 2] = 1
 
-            data_ = csimage.find_cell_axis_center(img_cell, self.pixel_size, resize_image=True)
+            # data_ = csimage.find_cell_axis_center(img_cell, self.pixel_size, resize_image=True)
+            data_ = csimage.find_cell_axis_center_every_z(img_cell,
+                                                          self.pixel_size,
+                                                          resize_image=True)
 
             # measure nb neighbours
-            neighbours_id, nb_neighbors_plane = csimage.find_neighbours_cell_id(img_cell_dil, self.label_image, by_plane=True)
+            neighbours_id, nb_neighbors_plane = (
+                csimage.find_neighbours_cell_id(img_cell_dil,
+                                                self.label_image,
+                                                by_plane=True,
+                                                z_planes=data_["z_center"].to_numpy()))
 
             # Get center of the cell
             sparce_cell = sparse.COO.from_numpy(img_cell)
@@ -278,7 +285,7 @@ class Segmentation:
                                                    "x_e1_mean", "y_e1_mean", "z_e1_mean",
                                                    "x_e2_mean", "y_e2_mean", "z_e2_mean",
                                                    "x_mid", "y_mid", "z_mid", ])
-        # for c_id in self.unique_id_cells:
+
         for i in tqdm(range(len(self.unique_id_cells)), desc="Cell", leave=True):
             c_id = self.unique_id_cells[i]
             # open file
@@ -297,7 +304,7 @@ class Segmentation:
                                                    face_edge_pixel_df.columns, edge_pixel_df
                                                    )
                     for c_op_index in opp_cell.keys()]
-                # res = joblib.Parallel(n_jobs=self.nb_core)(delayed_call)
+
                 with csutils.tqdm_joblib(desc="Face segmentation", total=len(opp_cell.keys())) as progress_bar:
                     res = joblib.Parallel(n_jobs=self.nb_core, prefer="threads")(delayed_call)
 
@@ -465,12 +472,19 @@ def edge_detection(seg, cell_df, cell_plane_df, edge_pixel_columns, c_id, img_ce
     x_cell = []
     y_cell = []
     z_cell = []
+    pos_to_drop = []
     for i in range(len(z0)):
         cell_pos_plane = cell_pos[cell_pos['z'] == z0[i]]
         if len(cell_pos_plane) != 0:
             x_cell.append((x0[i] - cell_pos_plane['x']).to_numpy()[0])
             y_cell.append((y0[i] - cell_pos_plane['y']).to_numpy()[0])
             z_cell.append(z0[i])
+        else:
+            pos_to_drop.append(i)
+
+    x0 = np.delete(x0, pos_to_drop)
+    y0 = np.delete(y0, pos_to_drop)
+    z0 = np.delete(z0, pos_to_drop)
 
     e_pixel = pd.DataFrame(np.array([np.repeat(c_id, len(x0)),
                                      np.repeat(cb, len(x0)),

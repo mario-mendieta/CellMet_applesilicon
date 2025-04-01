@@ -39,7 +39,8 @@ def get_unique_id_in_image(image, background_value=0):
     return id_cells
 
 
-def find_neighbours_cell_id(img_cell_dil, img_seg, background_value=0, by_plane=False):
+def find_neighbours_cell_id(img_cell_dil, img_seg, background_value=0,
+                            by_plane=False, z_planes=None):
     """
     Find cell neighbours id of img_cell inside img_seg.
     Parameters
@@ -58,13 +59,23 @@ def find_neighbours_cell_id(img_cell_dil, img_seg, background_value=0, by_plane=
 
     if by_plane:
         nb_neighbors_plane = []
-        for z in range(img_multi.shape[0]):
-            id_unique_plane = pd.unique(img_multi[z].flatten())
-            id_unique_plane = np.delete(id_unique_plane, np.where(id_unique_plane == 0))
-            if len(id_unique_plane) == 0:
-                nb_neighbors_plane.append(np.nan)
-            else:
-                nb_neighbors_plane.append(len(id_unique_plane))
+        if z_planes is None:
+            for z in range(img_multi.shape[0]):
+                id_unique_plane = pd.unique(img_multi[z].flatten())
+                id_unique_plane = np.delete(id_unique_plane, np.where(id_unique_plane == 0))
+                if len(id_unique_plane) == 0:
+                    nb_neighbors_plane.append(np.nan)
+                else:
+                    nb_neighbors_plane.append(len(id_unique_plane))
+        else:
+            for z in z_planes:
+                id_unique_plane = pd.unique(img_multi[int(z)].flatten())
+                id_unique_plane = np.delete(id_unique_plane,
+                                            np.where(id_unique_plane == 0))
+                if len(id_unique_plane) == 0:
+                    nb_neighbors_plane.append(np.nan)
+                else:
+                    nb_neighbors_plane.append(len(id_unique_plane))
 
         # remove all np.nan
         nb_neighbors_plane = np.array(nb_neighbors_plane)[~np.isnan(nb_neighbors_plane)]
@@ -175,6 +186,65 @@ def find_cell_axis_center(img_cell, pixel_size, resize_image=True):
                       "x_center_um", "y_center_um", "z_center_um"]
     return result
 
+def find_cell_axis_center_every_z(img_cell, pixel_size, resize_image=True):
+    """
+    Calculate distance map, and keep the maximum distance in each z plane in order to find the center of the cell.
+    Warning : result is slightly different from the measure made by ImageJ even if its is the same function that is used.
+
+    Parameters
+    ----------
+    img_cell (np.array): binary image of one cell
+    pixel_size (dict): size of pixel
+    resize_image (bool): default True, allow to reduce np.array() size around the cell to fasten the distance_transform_edt calculation.
+
+    Returns
+    -------
+    result (pd.DataFrame): position of the maximum distance for each z plane
+    """
+    if resize_image:
+        # zz, yy, xx = np.where(img_cell == 1)
+        sparce_cell = sparse.COO.from_numpy(img_cell)
+        zz, yy, xx = sparce_cell.coords
+        xx_min = max(xx.min() - 1, 0)
+        yy_min = max(yy.min() - 1, 0)
+        zz_min = max(zz.min() - 1, 0)
+
+        xx_max = min(xx.max() + 1, img_cell.shape[2])
+        yy_max = min(yy.max() + 1, img_cell.shape[1])
+        zz_max = min(zz.max() + 1, img_cell.shape[0])
+
+        sub_img_cell = img_cell[zz_min:zz_max,
+                       yy_min:yy_max,
+                       xx_min:xx_max
+                       ]
+    else:
+        sub_img_cell = img_cell
+        xx_min, yy_min, zz_min = 0, 0, 0
+
+    edts = ndi.distance_transform_edt(sub_img_cell,
+                                      sampling=[pixel_size["z_size"],
+                                                pixel_size["y_size"],
+                                                pixel_size["x_size"]],
+                                      )
+    # Find center (=highest value) in each plane
+    x_c, y_c, z_c = [], [], []
+    for k in range(edts.shape[0]):
+        if edts[k].max() != 0:
+            y_, x_ = np.where(edts[k] == edts[k].max())
+            x_c.append(x_.mean() + xx_min)
+            y_c.append(y_.mean() + yy_min)
+            z_c.append(k + zz_min)
+
+    result = pd.DataFrame(data=[np.array(x_c),
+                                np.array(y_c),
+                                np.array(z_c),
+                                np.array(x_c) * pixel_size["x_size"],
+                                np.array(y_c) * pixel_size["y_size"],
+                                np.array(z_c) * pixel_size["z_size"],
+                                ]).T
+    result.columns = ["x_center", "y_center", "z_center",
+                      "x_center_um", "y_center_um", "z_center_um"]
+    return result
 
 def colored_image_cell(image, cell_df, column, normalize=True, normalize_max=None):
     if column not in cell_df.columns:
