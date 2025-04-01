@@ -58,7 +58,7 @@ def cell_analysis(seg: Segmentation, parallelized=True, degree_convert=True):
                     "r1",
                     "r2",
                     "r3",
-                    "aspect_ratio"
+                    "aspect_ratio",
                     'x_start',
                     'y_start',
                     'z_start',
@@ -148,16 +148,17 @@ def sc_analysis_parallel(seg, c_id, degree_convert=True):
     img_cell_dil = sparse_cell.todense()
     img_cell_dil[img_cell_dil == 2] = 1
     img_cell = csimage.get_label(sparse_cell.todense(), 1).astype("uint8")
-    data_ = csimage.find_cell_axis_center(img_cell, seg.pixel_size,
+    data_ = csimage.find_cell_axis_center_every_z(img_cell, seg.pixel_size,
                                           resize_image=True)
     # measure nb neighbours
     neighbours_id, nb_neighbors_plane = csimage.find_neighbours_cell_id(
-        img_cell_dil, seg.label_image, by_plane=True)
+        img_cell_dil, seg.label_image, by_plane=True, z_planes=data_[
+            "z_center"].to_numpy())
     (a, ox, oy, maj, mi, ar, per, cir) = measure_cell_plane(img_cell,
                                                             seg.pixel_size)
 
     cell_plane_out = np.array([np.repeat(int(c_id), len(data_[
-                                                            "x_center"].to_numpy())),
+                                                            "z_center"].to_numpy())),
                                data_["x_center"].to_numpy(),
                                data_["y_center"].to_numpy(),
                                data_["z_center"].to_numpy(),
@@ -203,7 +204,10 @@ def sc_analysis_parallel(seg, c_id, degree_convert=True):
     theta = np.arccos(maj_axis_direction[2])
     phi = np.arctan2(maj_axis_direction[1], maj_axis_direction[0])
 
-    aspect_ratio = r1 / r3
+    if r3 == 0 :
+        aspect_ratio = np.NaN
+    else:
+        aspect_ratio = r1 / r3
     elongation = r1 / np.mean([r2, r3])
     ellipticity = (r1 - r3) / r1
     # -------------------------------------------------------------
@@ -277,10 +281,18 @@ def edge_analysis(seg: Segmentation):
         df_.reset_index(drop=False, inplace=True)
         # Smooth data ?
         from scipy.interpolate import splprep, splev
-        tck, u = splprep(df_[list("xyz")].to_numpy().T, s=2)
-        u_fine = np.linspace(0, 1, len(df_))
-        smoothed_points = np.column_stack(splev(u_fine, tck))
-        sm_point_df = pd.DataFrame(smoothed_points3, columns=list("xyz"))
+        # check if there is enough data to smooth
+        if len(df_[list("xyz")]) < 3:
+            sm_point_df = df_[list("xyz")]
+        else:
+            if len(df_[list("xyz")]) == 3:
+                tck, u = splprep(df_[list("xyz")].to_numpy().T, s=2, k=2)
+            else:
+                tck, u = splprep(df_[list("xyz")].to_numpy().T, s=2)
+            u_fine = np.linspace(0, 1, len(df_))
+            smoothed_points = np.column_stack(splev(u_fine, tck))
+            sm_point_df = pd.DataFrame(smoothed_points, columns=list("xyz"))
+            
         rd, sd, ci = calculate_lengths_tortuosity(sm_point_df, columns=list(
             "xyz"))
         real_dist.append(rd)
@@ -479,42 +491,52 @@ def measure_cell_plane(img_cell, pixel_size):
     cell_in_z_plan = np.where(img_cell.sum(axis=1).sum(axis=1) > 0)[0]
 
     for z in cell_in_z_plan:
+        z = int(z)
         points = np.array(np.where(img_cell[z, :, :] > 0)).flatten().reshape(
             len(np.where(img_cell[z, :, :] > 0)[1]),
             2,
             order='F')
         if len(points) > 10:
-            try:
-                hull = ConvexHull(points)
+            # try:
+            hull = ConvexHull(points)
 
-                # Measure cell anisotropy
-                # need to center the face at 0, 0
-                # otherwise the calculation is wrong
-                pts = (points - points.mean(axis=0)) * pixel_size['x_size']
-                u, s, vh = np.linalg.svd(pts)
-                svd = np.concatenate((s, vh[0, :]))
+            # Measure cell anisotropy
+            # need to center the face at 0, 0
+            # otherwise the calculation is wrong
+            pts = (points - points.mean(axis=0)) * pixel_size['x_size']
+            u, s, vh = np.linalg.svd(pts)
+            svd = np.concatenate((s, vh[0, :]))
 
-                s.sort()
-                s = s[::-1]
+            s.sort()
+            s = s[::-1]
 
-                orientation = svd[2:]
-                aniso.append(s[0] / s[1])
-                orientation_x.append(orientation[0])
-                orientation_y.append(orientation[1])
-                major.append(s[0])
-                minor.append(s[1])
-                perimeter.append(hull.area)
-                area.append(hull.volume)
-                circularity.append(4 * np.pi * area / perimeter ** 2)
-            except:
-                aniso.append(np.nan)
-                orientation_x.append(np.nan)
-                orientation_y.append(np.nan)
-                major.append(np.nan)
-                minor.append(np.nan)
-                perimeter.append(np.nan)
-                area.append(np.nan)
-                circularity.append(np.nan)
+            orientation = svd[2:]
+            aa=s[0] / s[1]
+            ox=orientation[0]
+            oy=orientation[1]
+            maj=s[0]
+            mi=s[1]
+            per=hull.area
+            a = hull.volume
+            cir=4 * np.pi * aa / per ** 2
+            # except:
+            #     aa=np.nan
+            #     ox = np.nan
+            #     oy = np.nan
+            #     maj = np.nan
+            #     mi = np.nan
+            #     per = np.nan
+            #     a = np.nan
+            #     cir = np.nan
+
+            aniso.append(aa)
+            orientation_x.append(ox)
+            orientation_y.append(oy)
+            major.append(maj)
+            minor.append(mi)
+            perimeter.append(per)
+            area.append(a)
+            circularity.append(cir)
 
         else:
             aniso.append(np.nan)
