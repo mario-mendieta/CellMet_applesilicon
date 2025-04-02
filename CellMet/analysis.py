@@ -210,6 +210,7 @@ def sc_analysis_parallel(seg, c_id, degree_convert=True):
         aspect_ratio = r1 / r3
     elongation = r1 / np.mean([r2, r3])
     ellipticity = (r1 - r3) / r1
+    eccentricty = np.sqrt(1-(r3**2/r1**2))
     # -------------------------------------------------------------
 
     volume = (len(sparse_cell.coords[0]) * seg.voxel_size)
@@ -241,6 +242,7 @@ def sc_analysis_parallel(seg, c_id, degree_convert=True):
                 "aspect_ratio": aspect_ratio,
                 "elongation": elongation,
                 "ellipticity": ellipticity,
+                "eccentricty": eccentricty,
                 'x_start': start[0],
                 'y_start': start[1],
                 'z_start': start[2],
@@ -500,7 +502,7 @@ def measure_cell_plane(img_cell, pixel_size):
             # try:
             hull = ConvexHull(points)
 
-            # Measure cell anisotropy
+            # Measure cell                                   anisotropy
             # need to center the face at 0, 0
             # otherwise the calculation is wrong
             pts = (points - points.mean(axis=0)) * pixel_size['x_size']
